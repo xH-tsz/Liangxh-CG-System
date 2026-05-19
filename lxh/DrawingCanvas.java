@@ -40,6 +40,9 @@ public class DrawingCanvas extends JPanel {
     private ShapeData currentShape;
     private List<Point2D.Double> tempPoints;
     
+    private List<List<ShapeData>> historyStack;
+    private int historyIndex;
+    
     private Point2D.Double firstClickPoint;
     private Point2D.Double currentMousePoint;
     
@@ -78,8 +81,50 @@ public class DrawingCanvas extends JPanel {
         offsetX = 0.0;
         offsetY = 0.0;
         setBackground(Color.WHITE);
+        
+        historyStack = new ArrayList<>();
+        saveHistory();
+        
         initMouseActions();
         initKeyActions();
+    }
+    
+    private void saveHistory() {
+        List<ShapeData> snapshot = new ArrayList<>();
+        for (ShapeData shape : shapes) {
+            ShapeData copy = new ShapeData(shape.closed, shape.fillable, shape.type, shape.strokeColor, shape.fillColor);
+            for (Point2D.Double p : shape.points) {
+                copy.points.add(new Point2D.Double(p.x, p.y));
+            }
+            snapshot.add(copy);
+        }
+        while (historyStack.size() > historyIndex + 1) {
+            historyStack.remove(historyStack.size() - 1);
+        }
+        historyStack.add(snapshot);
+        historyIndex = historyStack.size() - 1;
+        
+        if (historyStack.size() > 50) {
+            historyStack.remove(0);
+            historyIndex--;
+        }
+    }
+    
+    public void undo() {
+        if (historyIndex > 0) {
+            historyIndex--;
+            List<ShapeData> previous = historyStack.get(historyIndex);
+            shapes.clear();
+            for (ShapeData shape : previous) {
+                ShapeData copy = new ShapeData(shape.closed, shape.fillable, shape.type, shape.strokeColor, shape.fillColor);
+                for (Point2D.Double p : shape.points) {
+                    copy.points.add(new Point2D.Double(p.x, p.y));
+                }
+                shapes.add(copy);
+            }
+            selectedShapes.clear();
+            repaint();
+        }
     }
 
     private void initMouseActions() {
@@ -183,19 +228,20 @@ public class DrawingCanvas extends JPanel {
                 }
                 
                 if (freehandDrawing && "freehand".equals(currentTool) && !e.isControlDown()) {
-                    freehandDrawing = false;
-                    if (tempPoints.size() >= 3) {
-                        Point2D.Double first = tempPoints.get(0);
-                        Point2D.Double last = tempPoints.get(tempPoints.size() - 1);
-                        if (first.distance(last) > 1.0) {
-                            tempPoints.add(new Point2D.Double(first.x, first.y));
+                        freehandDrawing = false;
+                        if (tempPoints.size() >= 3) {
+                            Point2D.Double first = tempPoints.get(0);
+                            Point2D.Double last = tempPoints.get(tempPoints.size() - 1);
+                            if (first.distance(last) > 1.0) {
+                                tempPoints.add(new Point2D.Double(first.x, first.y));
+                            }
+                            ShapeData freehand = new ShapeData(true, false, "freehand", currentStrokeColor, currentFillColor);
+                            freehand.points.addAll(new ArrayList<>(tempPoints));
+                            shapes.add(freehand);
+                            saveHistory();
                         }
-                        ShapeData freehand = new ShapeData(true, false, "freehand", currentStrokeColor, currentFillColor);
-                        freehand.points.addAll(new ArrayList<>(tempPoints));
-                        shapes.add(freehand);
-                    }
-                    tempPoints.clear();
-                } else if (!didDrag && !"freehand".equals(currentTool)) {
+                        tempPoints.clear();
+                    } else if (!didDrag && !"freehand".equals(currentTool)) {
                     Point2D.Double logicalPoint = screenToLogical(e.getPoint());
                     handleToolClick(logicalPoint);
                 }
@@ -243,6 +289,7 @@ public class DrawingCanvas extends JPanel {
                 line.points.add(new Point2D.Double(firstClickPoint.x, firstClickPoint.y));
                 line.points.add(new Point2D.Double(p.x, p.y));
                 shapes.add(line);
+                saveHistory();
                 firstClickPoint = null;
             }
         } else if ("circle".equals(currentTool)) {
@@ -253,6 +300,7 @@ public class DrawingCanvas extends JPanel {
                 if (r > 0) {
                     ShapeData circle = buildCircle(firstClickPoint.x, firstClickPoint.y, r);
                     shapes.add(circle);
+                    saveHistory();
                 }
                 firstClickPoint = null;
             }
@@ -260,7 +308,9 @@ public class DrawingCanvas extends JPanel {
             tempPoints.add(p);
             repaint();
         } else if ("eraser".equals(currentTool)) {
-            eraseAtPoint(p);
+            if (eraseAtPoint(p)) {
+                saveHistory();
+            }
         } else if (seedMode) {
             seedPoint = p;
             repaint();
@@ -379,12 +429,14 @@ public class DrawingCanvas extends JPanel {
         line.points.add(new Point2D.Double(x1, y1));
         line.points.add(new Point2D.Double(x2, y2));
         shapes.add(line);
+        saveHistory();
         repaint();
     }
 
     public void addCircle(int cx, int cy, int r) {
         ShapeData circle = buildCircle(cx, cy, r);
         shapes.add(circle);
+        saveHistory();
         repaint();
     }
 
@@ -398,6 +450,7 @@ public class DrawingCanvas extends JPanel {
         polygon.points.addAll(new ArrayList<>(tempPoints));
         shapes.add(polygon);
         tempPoints.clear();
+        saveHistory();
         repaint();
     }
     
@@ -412,6 +465,7 @@ public class DrawingCanvas extends JPanel {
             freehand.points.addAll(new ArrayList<>(tempPoints));
             shapes.add(freehand);
             tempPoints.clear();
+            saveHistory();
             repaint();
         }
     }
@@ -904,6 +958,7 @@ public class DrawingCanvas extends JPanel {
                 if (e.getKeyCode() == KeyEvent.VK_BACK_SPACE || e.getKeyCode() == KeyEvent.VK_DELETE) {
                     if (!selectedShapes.isEmpty()) {
                         shapes.removeAll(selectedShapes);
+                        saveHistory();
                         selectedShapes.clear();
                         repaint();
                     }
@@ -912,6 +967,8 @@ public class DrawingCanvas extends JPanel {
                         selectedShapes.clear();
                         repaint();
                     }
+                } else if (e.getKeyCode() == KeyEvent.VK_Z && e.isControlDown()) {
+                    undo();
                 }
             }
         });
